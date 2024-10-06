@@ -17,8 +17,13 @@ type ProductInfo struct {
 }
 
 func (pi ProductInfo) ImageUrl(fileId string) string {
-	return strings.Replace(pi.Products[0].ImageUrl, "{file_id}", strings.ToLower(fileId), 1)
+	if len(pi.Products) == 0 {
+		return ""
+	}
+	lastProduct := pi.Products[len(pi.Products)-1]
+	return strings.Replace(lastProduct.ImageUrl, "{file_id}", strings.ToLower(fileId), 1)
 }
+
 
 func (pi ProductInfo) AutoplayEnabled() bool {
 	return pi.Products[0].Autoplay == "1"
