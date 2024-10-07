@@ -328,6 +328,10 @@ func (p *Player) NewStream(spotId librespot.SpotifyId, bitrate int, mediaPositio
 		if err != nil {
 			return nil, fmt.Errorf("failed getting track metadata: %w", err)
 		}
+		albumMeta, err := p.sp.MetadataForAlbum(librespot.SpotifyIdFromGid(librespot.SpotifyIdTypeAlbum, trackMeta.Album.Gid))
+		if err != nil {
+			return nil, fmt.Errorf("failed getting album metadata: %w", err)
+		}
 
 		media = librespot.NewMediaFromTrack(trackMeta)
 		if !DisableCheckMediaRestricted && isMediaRestricted(media, *p.countryCode) {
@@ -345,6 +349,7 @@ func (p *Player) NewStream(spotId librespot.SpotifyId, bitrate int, mediaPositio
 
 			log.Warnf("original track has no formats, alternatives have a total of %d", len(trackMeta.File))
 		}
+		trackMeta.Album = albumMeta
 
 		file = selectBestMediaFormat(trackMeta.File, bitrate)
 		if file == nil {
