@@ -45,6 +45,7 @@ func ContextTrackToProvidedTrack(typ SpotifyIdType, track *connectpb.ContextTrac
 type SpotifyIdType string
 
 const (
+	SpotifyIdTypeAlbum   SpotifyIdType = "album"
 	SpotifyIdTypeTrack   SpotifyIdType = "track"
 	SpotifyIdTypeEpisode SpotifyIdType = "episode"
 )
