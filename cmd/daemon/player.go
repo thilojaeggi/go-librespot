@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	librespot "go-librespot"
 	"go-librespot/ap"
 	"go-librespot/dealer"
@@ -13,11 +12,13 @@ import (
 	connectpb "go-librespot/proto/spotify/connectstate"
 	"go-librespot/session"
 	"go-librespot/tracks"
-	"google.golang.org/protobuf/proto"
 	"math"
 	"strings"
 	"sync"
 	"time"
+
+	log "github.com/sirupsen/logrus"
+	"google.golang.org/protobuf/proto"
 )
 
 type AppPlayer struct {
