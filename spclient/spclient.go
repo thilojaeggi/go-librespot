@@ -5,18 +5,19 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/cenkalti/backoff/v4"
-	log "github.com/sirupsen/logrus"
 	librespot "go-librespot"
 	connectpb "go-librespot/proto/spotify/connectstate"
 	storagepb "go-librespot/proto/spotify/download"
 	metadatapb "go-librespot/proto/spotify/metadata"
 	playerpb "go-librespot/proto/spotify/player"
-	"google.golang.org/protobuf/proto"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
+
+	"github.com/cenkalti/backoff/v4"
+	log "github.com/sirupsen/logrus"
+	"google.golang.org/protobuf/proto"
 )
 
 type Spclient struct {
@@ -201,6 +202,36 @@ func (c *Spclient) ResolveStorageInteractive(fileId []byte, prefetch bool) (*sto
 	}
 
 	return &protoResp, nil
+}
+
+func (c *Spclient) MetadataForAlbum(album librespot.SpotifyId) (*metadatapb.Album, error) {
+	if album.Type() != librespot.SpotifyIdTypeAlbum {
+		panic(fmt.Sprintf("invalid type: %s", album.Type()))
+	}
+
+	resp, err := c.request("GET", fmt.Sprintf("/metadata/4/album/%s", album.Hex()), nil, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("invalid status code from album metadata: %d", resp.StatusCode)
+	}
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed reading response body: %w", err)
+	}
+
+	var protoResp metadatapb.Album
+	if err := proto.Unmarshal(respBytes, &protoResp); err != nil {
+		return nil, fmt.Errorf("failed unmarshalling Album: %w", err)
+	}
+
+	return &protoResp, nil
+
 }
 
 func (c *Spclient) MetadataForTrack(track librespot.SpotifyId) (*metadatapb.Track, error) {
