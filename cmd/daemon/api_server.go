@@ -7,9 +7,9 @@ import (
 	"errors"
 	"fmt"
 	librespot "go-librespot"
+	metadatapb "go-librespot/proto/spotify/metadata"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -118,64 +118,119 @@ type ApiResponseStatusAlbum struct {
 	TrackCount    int                      `json:"track_count"`
 }
 
+func parseDateString(dateString string) (time.Time, error) {
+	var year, month, day int
+	n, err := fmt.Sscanf(dateString, "year:%d month:%d day:%d", &year, &month, &day)
+	if err != nil || n != 3 {
+		return time.Time{}, fmt.Errorf("failed to parse date: %v", err)
+	}
+	return time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC), nil
+}
+
+func derefString(s *string) string {
+	if s != nil {
+		return *s
+	}
+	return ""
+}
+
+func derefUint32(u *uint32) uint32 {
+	if u != nil {
+		return *u
+	}
+	return 0
+}
+
+func derefInt32(i *int32) int32 {
+	if i != nil {
+		return *i
+	}
+	return 0
+}
+
+func derefInt64(i *int64) int64 {
+	if i != nil {
+		return *i
+	}
+	return 0
+}
+
+func derefUint64(u *uint64) uint64 {
+	if u != nil {
+		return *u
+	}
+	return 0
+}
+
+func extractCoverUrls(covers []*metadatapb.Image, prodInfo *ProductInfo) []string {
+	var urls []string
+	for _, cover := range covers {
+		if cover != nil && cover.FileId != nil {
+			urls = append(urls, prodInfo.ImageUrl(hex.EncodeToString(cover.FileId)))
+		}
+	}
+	return urls
+}
+
+func extractCoverGroupUrls(group *metadatapb.ImageGroup, prodInfo *ProductInfo) []string {
+	var urls []string
+	if group != nil {
+		for _, image := range group.Image {
+			if image.FileId != nil {
+				urls = append(urls, prodInfo.ImageUrl(hex.EncodeToString(image.FileId)))
+			}
+		}
+	}
+	return urls
+}
 func NewApiResponseStatusTrack(media *librespot.Media, prodInfo *ProductInfo, position int64) *ApiResponseStatusTrack {
 	if media.IsTrack() {
 		track := media.Track()
 		var artists []string
 		for _, a := range track.Artist {
-			artists = append(artists, *a.Name)
+			if a.Name != nil {
+				artists = append(artists, *a.Name)
+			}
 		}
 
-		dateString := track.Album.Date.String() // assuming this is a valid date string format
-		parts := strings.Fields(dateString)     // Split by spaces
-		if len(parts) < 3 {
-			log.Fatalf("Invalid date format")
-		}
-
-		// Remove the prefixes (e.g., "year:", "month:", "day:")
-		year := strings.Split(parts[0], ":")[1]
-		month := strings.Split(parts[1], ":")[1]
-		day := strings.Split(parts[2], ":")[1]
-
-		// Create a valid date string in the format "YYYY-MM-DD"
-		formattedDate := fmt.Sprintf("%s-%02s-%02s", year, month, day)
-
-		// Now parse the formatted date string
-		parsedDate, err := time.Parse("2006-01-02", formattedDate)
-		if err != nil {
-			log.Fatalf("Error parsing date: %v", err)
+		var parsedDate time.Time
+		dateString := track.Album.Date.String()
+		if dateString != "" {
+			date, err := parseDateString(dateString)
+			if err != nil {
+				log.WithError(err).Warn("Error parsing date")
+			} else {
+				parsedDate = date
+			}
 		}
 
 		return &ApiResponseStatusTrack{
-			Uri:         librespot.SpotifyIdFromGid(librespot.SpotifyIdTypeTrack, track.Gid).Uri(),
-			Name:        *track.Name,
-			ArtistNames: artists,
-			AlbumName:   *track.Album.Name,
-			TrackCoverUrl: func() []string {
-				var urls []string
-				for _, cover := range track.Album.Cover {
-					urls = append(urls, prodInfo.ImageUrl(hex.EncodeToString(cover.FileId)))
-				}
-				return urls
-			}(),
-			AlbumCoverUrl: func() []string {
-				var urls []string
-				if track.Album.CoverGroup != nil {
-					for _, image := range track.Album.CoverGroup.Image {
-						urls = append(urls, prodInfo.ImageUrl(hex.EncodeToString(image.FileId)))
-					}
-				}
-				return urls
-			}(),
-			Position:    position,
-			Duration:    int(*track.Duration),
-			ReleaseDate: parsedDate,
-			TrackNumber: int(*track.Number),
-			DiscNumber:  int(*track.DiscNumber),
-			HasLyrics:   *track.HasLyrics,
+			Uri:           librespot.SpotifyIdFromGid(librespot.SpotifyIdTypeTrack, track.Gid).Uri(),
+			Name:          derefString(track.Name),
+			ArtistNames:   artists,
+			AlbumName:     derefString(track.Album.Name),
+			TrackCoverUrl: extractCoverUrls(track.Album.Cover, prodInfo),
+			AlbumCoverUrl: extractCoverGroupUrls(track.Album.CoverGroup, prodInfo),
+			Position:      position,
+			Duration:      int(derefInt32(track.Duration)), // Use derefInt32
+			ReleaseDate:   parsedDate,
+			TrackNumber:   int(derefInt32(track.Number)),     // Use derefInt32
+			DiscNumber:    int(derefInt32(track.DiscNumber)), // Use derefInt32
+			HasLyrics:     track.GetHasLyrics(),
 		}
 	} else {
 		episode := media.Episode()
+
+		var parsedDate time.Time
+		dateString := episode.PublishTime.String()
+		if dateString != "" {
+			date, err := parseDateString(dateString)
+			if err != nil {
+				log.WithError(err).Warn("Error parsing date")
+			} else {
+				parsedDate = date
+			}
+		}
 
 		var albumCoverId string
 		if len(episode.CoverImage.Image) > 0 {
@@ -184,112 +239,75 @@ func NewApiResponseStatusTrack(media *librespot.Media, prodInfo *ProductInfo, po
 
 		return &ApiResponseStatusTrack{
 			Uri:           librespot.SpotifyIdFromGid(librespot.SpotifyIdTypeEpisode, episode.Gid).Uri(),
-			Name:          *episode.Name,
-			ArtistNames:   []string{*episode.Show.Name},
-			AlbumName:     *episode.Show.Name,
+			Name:          derefString(episode.Name),
+			ArtistNames:   []string{derefString(episode.Show.Name)},
+			AlbumName:     derefString(episode.Show.Name),
 			AlbumCoverUrl: []string{prodInfo.ImageUrl(albumCoverId)},
 			Position:      position,
-			Duration:      int(*episode.Duration),
-			ReleaseDate:   time.Now(),
+			Duration:      int(derefInt32(episode.Duration)), // Use derefInt32
+			ReleaseDate:   parsedDate,
 			TrackNumber:   0,
 			DiscNumber:    0,
 			HasLyrics:     false,
 		}
 	}
 }
-
 func NewApiResponseStatusAlbum(media *librespot.Media, prodInfo *ProductInfo) *ApiResponseStatusAlbum {
 	album := media.Album()
 
 	var artists []string
 	for _, a := range album.Artist {
-		artists = append(artists, *a.Name)
+		artists = append(artists, derefString(a.Name))
 	}
 
-	dateString := album.Date.String()   // assuming this is a valid date string format
-	parts := strings.Fields(dateString) // Split by spaces
-	if len(parts) < 3 {
-		log.Fatalf("Invalid date format")
-	}
-
-	// Remove the prefixes (e.g., "year:", "month:", "day:")
-	year := strings.Split(parts[0], ":")[1]
-	month := strings.Split(parts[1], ":")[1]
-	day := strings.Split(parts[2], ":")[1]
-
-	// Create a valid date string in the format "YYYY-MM-DD"
-	formattedDate := fmt.Sprintf("%s-%02s-%02s", year, month, day)
-
-	// Now parse the formatted date string
-	parsedDate, err := time.Parse("2006-01-02", formattedDate)
-
-	if err != nil {
-		log.Fatalf("Error parsing date: %v", err)
+	var parsedDate time.Time
+	dateString := album.Date.String()
+	if dateString != "" {
+		date, err := parseDateString(dateString)
+		if err != nil {
+			log.WithError(err).Warn("Error parsing date")
+		} else {
+			parsedDate = date
+		}
 	}
 
 	var tracks []ApiResponseStatusTrack
-
-	// Get all tracks in the album from all discs
 	for _, disc := range album.GetDisc() {
 		for _, track := range disc.GetTrack() {
-			// Skip placeholder tracks
 			if track.GetName() == "" || track.GetDuration() == 0 {
 				continue
 			}
-			artists := []string{}
+			var trackArtists []string
 			for _, artist := range track.GetArtist() {
-				artists = append(artists, artist.GetName())
+				trackArtists = append(trackArtists, derefString(artist.Name))
 			}
 
 			tracks = append(tracks, ApiResponseStatusTrack{
-				Uri:         librespot.SpotifyIdFromGid(librespot.SpotifyIdTypeTrack, track.GetGid()).Uri(),
-				Name:        track.GetName(),
-				ArtistNames: artists,
-				AlbumName:   album.GetName(),
-				TrackCoverUrl: func() []string {
-					var urls []string
-					for _, cover := range track.GetAlbum().GetCover() {
-						urls = append(urls, prodInfo.ImageUrl(hex.EncodeToString(cover.GetFileId())))
-					}
-					return urls
-				}(),
-				AlbumCoverUrl: func() []string {
-					var urls []string
-					if track.GetAlbum().GetCoverGroup() != nil {
-						for _, image := range track.GetAlbum().GetCoverGroup().GetImage() {
-							urls = append(urls, prodInfo.ImageUrl(hex.EncodeToString(image.GetFileId())))
-						}
-					}
-					return urls
-				}(),
-				Position:    int64(track.GetNumber()),
-				Duration:    int(track.GetDuration()),
-				ReleaseDate: parsedDate,
-				TrackNumber: int(track.GetNumber()),
-				DiscNumber:  int(disc.GetNumber()),
+				Uri:           librespot.SpotifyIdFromGid(librespot.SpotifyIdTypeTrack, track.GetGid()).Uri(),
+				Name:          derefString(track.Name),
+				ArtistNames:   trackArtists,
+				AlbumName:     derefString(album.Name),
+				TrackCoverUrl: extractCoverUrls(track.GetAlbum().GetCover(), prodInfo),
+				AlbumCoverUrl: extractCoverGroupUrls(track.GetAlbum().GetCoverGroup(), prodInfo),
+				Position:      int64(derefInt32(track.Number)), // Use derefInt32
+				Duration:      int(derefInt32(track.Duration)), // Use derefInt32
+				ReleaseDate:   parsedDate,
+				TrackNumber:   int(derefInt32(track.Number)), // Use derefInt32
+				DiscNumber:    int(derefInt32(disc.Number)),  // Use derefInt32
+				HasLyrics:     track.GetHasLyrics(),
 			})
 		}
 	}
-	log.Info(tracks)
 
 	return &ApiResponseStatusAlbum{
-		Uri:         librespot.SpotifyIdFromGid(librespot.SpotifyIdTypeAlbum, album.Gid).Uri(),
-		Name:        *album.Name,
-		ArtistNames: artists,
-		AlbumCoverUrl: func() []string {
-			var urls []string
-			if album.CoverGroup != nil {
-				for _, image := range album.CoverGroup.Image {
-					urls = append(urls, prodInfo.ImageUrl(hex.EncodeToString(image.FileId)))
-				}
-			}
-			return urls
-		}(),
-		ReleaseDate: parsedDate,
-		Tracks:      tracks,
-		TrackCount:  len(tracks),
+		Uri:           librespot.SpotifyIdFromGid(librespot.SpotifyIdTypeAlbum, album.Gid).Uri(),
+		Name:          derefString(album.Name),
+		ArtistNames:   artists,
+		AlbumCoverUrl: extractCoverGroupUrls(album.CoverGroup, prodInfo),
+		ReleaseDate:   parsedDate,
+		Tracks:        tracks,
+		TrackCount:    len(tracks),
 	}
-
 }
 
 type ApiResponseStatus struct {
@@ -368,10 +386,11 @@ type ApiEventDataShuffleContext struct {
 	Value bool `json:"value"`
 }
 
-func NewApiServer(address string, port int, allowOrigin string) (_ *ApiServer, err error) {
+func NewApiServer(address string, port int, allowOrigin string) (*ApiServer, error) {
 	s := &ApiServer{allowOrigin: allowOrigin}
 	s.requests = make(chan ApiRequest)
 
+	var err error
 	s.listener, err = net.Listen("tcp", fmt.Sprintf("%s:%d", address, port))
 	if err != nil {
 		return nil, fmt.Errorf("failed starting api listener: %w", err)
@@ -395,7 +414,7 @@ func (s *ApiServer) handleRequest(req ApiRequest, w http.ResponseWriter) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	} else if resp.err != nil {
-		log.WithError(resp.err).Error("failed handling status request")
+		log.WithError(resp.err).Error("failed handling request")
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -579,7 +598,6 @@ func (s *ApiServer) serve() {
 			return
 		}
 
-		// add the client to the list
 		s.clientsLock.Lock()
 		s.clients = append(s.clients, c)
 		s.clientsLock.Unlock()
@@ -593,7 +611,6 @@ func (s *ApiServer) serve() {
 			} else if err != nil {
 				log.WithError(err).Error("websocket connection errored")
 
-				// remove the client from the list
 				s.clientsLock.Lock()
 				for i, cc := range s.clients {
 					if cc == c {
@@ -626,7 +643,6 @@ func (s *ApiServer) Emit(ev *ApiEvent) {
 		err := wsjson.Write(ctx, client, ev)
 		cancel()
 		if err != nil {
-			// purposely do not propagate this to the caller
 			log.WithError(err).Error("failed communicating with websocket client")
 		}
 	}
@@ -639,13 +655,11 @@ func (s *ApiServer) Receive() <-chan ApiRequest {
 func (s *ApiServer) Close() {
 	s.close = true
 
-	// close all websocket clients
 	s.clientsLock.RLock()
 	for _, client := range s.clients {
 		_ = client.Close(websocket.StatusGoingAway, "")
 	}
 	s.clientsLock.RUnlock()
 
-	// close the listener
 	_ = s.listener.Close()
 }
