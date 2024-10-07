@@ -257,6 +257,32 @@ func (p *AppPlayer) loadCurrentTrack(paused, drop bool) error {
 		Type: ApiEventTypeMetadata,
 		Data: ApiEventDataMetadata(*NewApiResponseStatusTrack(p.primaryStream.Media, p.prodInfo, trackPosition)),
 	})
+
+	// If is a track, emit album metadata
+	if spotId.Type() == librespot.SpotifyIdTypeTrack {
+		track := p.primaryStream.Media.Track()
+		// Get tracks from album if available from within discs
+		for _, disc := range track.GetAlbum().GetDisc() {
+			for _, track := range disc.Track {
+				track, err := p.sess.Spclient().MetadataForTrack(librespot.SpotifyIdFromGid(librespot.SpotifyIdTypeTrack, track.Gid))
+				if err != nil {
+					log.WithError(err).Errorf("failed getting track metadata for %s", track.Gid)
+					continue
+				}
+				disc.Track = append(disc.Track, track)
+			}
+		}
+
+		if track.Album != nil {
+			var album = librespot.NewMediaFromAlbum(track.Album)
+
+			p.app.server.Emit(&ApiEvent{
+				Type: ApiEventTypeAlbumMetadata,
+				Data: ApiEventDataAlbumMetadata(*NewApiResponseStatusAlbum(album, p.prodInfo)),
+			})
+		}
+	}
+
 	return nil
 }
 
