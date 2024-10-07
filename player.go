@@ -13,6 +13,7 @@ var (
 
 type Media struct {
 	track   *metadatapb.Track
+	album   *metadatapb.Album
 	episode *metadatapb.Episode
 }
 
@@ -32,8 +33,20 @@ func NewMediaFromEpisode(episode *metadatapb.Episode) *Media {
 	return &Media{track: nil, episode: episode}
 }
 
+func NewMediaFromAlbum(album *metadatapb.Album) *Media {
+	if album == nil {
+		panic("nil album")
+	}
+
+	return &Media{track: nil, album: album}
+}
+
 func (te Media) IsTrack() bool {
 	return te.track != nil
+}
+
+func (te Media) IsAlbum() bool {
+	return te.album != nil
 }
 
 func (te Media) IsEpisode() bool {
@@ -46,6 +59,14 @@ func (te Media) Track() *metadatapb.Track {
 	}
 
 	return te.track
+}
+
+func (te Media) Album() *metadatapb.Album {
+	if te.album == nil {
+		panic("not an album")
+	}
+
+	return te.album
 }
 
 func (te Media) Episode() *metadatapb.Episode {
