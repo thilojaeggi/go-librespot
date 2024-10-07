@@ -2,7 +2,6 @@ package player
 
 import (
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	librespot "go-librespot"
 	"go-librespot/audio"
 	"go-librespot/output"
@@ -11,6 +10,8 @@ import (
 	"go-librespot/spclient"
 	"go-librespot/vorbis"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 const SampleRate = 44100
@@ -325,6 +326,10 @@ func (p *Player) NewStream(spotId librespot.SpotifyId, bitrate int, mediaPositio
 		if err != nil {
 			return nil, fmt.Errorf("failed getting track metadata: %w", err)
 		}
+		albumMeta, err := p.sp.MetadataForAlbum(librespot.SpotifyIdFromGid(librespot.SpotifyIdTypeAlbum, trackMeta.Album.Gid))
+		if err != nil {
+			return nil, fmt.Errorf("failed getting album metadata: %w", err)
+		}
 
 		media = librespot.NewMediaFromTrack(trackMeta)
 		if !DisableCheckMediaRestricted && isMediaRestricted(media, *p.countryCode) {
@@ -340,6 +345,7 @@ func (p *Player) NewStream(spotId librespot.SpotifyId, bitrate int, mediaPositio
 				trackMeta.File = append(trackMeta.File, alt.File...)
 			}
 		}
+		trackMeta.Album = albumMeta
 
 		file = selectBestMediaFormat(trackMeta.File, bitrate)
 		if file == nil {
