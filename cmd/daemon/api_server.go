@@ -16,6 +16,7 @@ import (
 	"github.com/rs/cors"
 
 	librespot "github.com/devgianlu/go-librespot"
+	metadatapb "github.com/devgianlu/go-librespot/proto/spotify/metadata"
 	log "github.com/sirupsen/logrus"
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
@@ -429,7 +430,6 @@ func NewApiServer(address string, port int, allowOrigin string, certFile string,
 	s := &ApiServer{allowOrigin: allowOrigin, certFile: certFile, keyFile: keyFile}
 	s.requests = make(chan ApiRequest)
 
-	var err error
 	s.listener, err = net.Listen("tcp", fmt.Sprintf("%s:%d", address, port))
 	if err != nil {
 		return nil, fmt.Errorf("failed starting api listener: %w", err)
